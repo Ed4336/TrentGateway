@@ -5,7 +5,9 @@ library(leaflet)
 library(osmdata)
 library(tidyverse)
 library(ggspatial)
+library(ggrepel)
 library(viridis)
+library(egg)
 
 #trent river plot----
 coords <- c(-2.23, 52.77, -0.64, 53.72)
@@ -118,6 +120,88 @@ ggplot()+
   geom_sf(data = SFmonitorSitesTrent, shape = 1, size = 3, alpha = 1, color = 'black') + 
   scale_color_manual(values = viridis(length(unique(SFmonitorSitesTrent$SITE_NAME))))
 
+
+##individual action zone plots----
+###create river sections----
+create_bboxes <- function(points_sf) {
+  bbox_list <- list()
+  
+  for (i in 1:(nrow(points_sf) - 1)) {
+    p1 <- st_coordinates(points_sf[i, ])
+    p2 <- st_coordinates(points_sf[i + 1, ])
+    
+    bbox_coords <- rbind(
+      c(min(p1[1], p2[1]) - 1000, min(p1[2], p2[2]) - 1000),  # Bottom-left
+      c(min(p1[1], p2[1]) - 1000, max(p1[2], p2[2]) + 1000),  # Top-left
+      c(max(p1[1], p2[1]) + 1000, max(p1[2], p2[2]) + 1000),  # Top-right
+      c(max(p1[1], p2[1]) + 1000, min(p1[2], p2[2]) - 1000),  # Bottom-right
+      c(min(p1[1], p2[1]) - 1000, min(p1[2], p2[2]) - 1000)   # Close polygon
+    )
+    
+    bbox_list[[i]] <- st_polygon(list(bbox_coords))
+  }
+  
+  # Convert to an sf object
+  bboxes_sf <- st_sf(
+    name = paste(points_sf$name[-length(points_sf$name)], 
+                 points_sf$name[-1], sep = "-"),
+    geometry = st_sfc(bbox_list, crs = 27700)
+  )
+  
+  return(bboxes_sf)
+}
+
+# Generate bounding boxes
+bboxes_sf <- create_bboxes(AZs_sf)
+
+# Create a list to store cropped river sections
+cropped_river_sections <- list()
+
+for (i in 1:nrow(bboxes_sf)) {
+  bbox <- bboxes_sf[i, ]
+  cropped_river_sections[[i]] <- st_crop(riverLines_filtered, bbox)
+}
+
+# Assign names based on the bounding box names
+names(cropped_river_sections) <- bboxes_sf$name
+
+###add in monitoring sites----
+
+# Create a list to store filtered monitoring sites per river section
+monitoring_sites_by_section <- lapply(1:nrow(bboxes_sf), function(i) {
+  bbox <- bboxes_sf[i, ]
+  sites_in_bbox <- SFmonitorSitesTrent[st_intersects(SFmonitorSitesTrent, bbox, sparse = FALSE), ]
+  return(sites_in_bbox)
+})
+
+# Assign names to match river sections
+names(monitoring_sites_by_section) <- bboxes_sf$name
+
+plot_river_section <- function(section_name, river_section, bbox, monitoring_sites) {
+  ggplot() +
+    annotation_map_tile(type = "osm", zoom = 12)+
+    geom_sf(data = river_section, color = "blue", size = 1) +
+    geom_sf(data = bbox, fill = NA, color = "black", linetype = 'dashed') +
+    geom_sf(data = monitoring_sites, aes(color = SITE_NAME), size = 3) +
+    scale_color_manual(values = rainbow(nrow(monitoring_sites))) +  # Optional: Assign unique colors
+    guides(color = guide_legend(title = "Monitoring Sites")) +  # Add legend title
+    ggtitle(paste("River Section:", section_name)) +
+    theme_minimal()
+}
+
+# Generate and display all plots with monitoring sites and names
+plot_list <- lapply(names(cropped_river_sections), function(section) {
+  plot_river_section(
+    section,
+    cropped_river_sections[[section]], 
+    bboxes_sf[bboxes_sf$name == section, ],
+    monitoring_sites_by_section[[section]]
+  )
+})
+
+# Print all plots
+for (p in plot_list) print(p)
+
 ##fish----
 
 fishCounts <- read_csv('Data/FW_Fish_Counts_2024-11-14.csv')
@@ -127,41 +211,78 @@ fishCounts <- st_as_sf(fishCounts, coords = c("SURVEY_RANKED_EASTING", "SURVEY_R
 filtFC <- fishCounts %>% 
   filter(SITE_ID %in% SFmonitorSitesTrent$SITE_ID)
 
-
-# Reorder to plot north to south
-
-filtFC$Northing <- st_coordinates(filtFC)[, 2]
-
-filtFC$SITE_NAME <- factor(filtFC$SITE_NAME,
-         levels = unique(filtFC$SITE_NAME[order(-filtFC$Northing)]))
-
-(
- survey.type.date <- ggplot(filtFC, aes(x = SITE_NAME, fill = SURVEY_METHOD))+
-    geom_bar(position = 'dodge')+
-    facet_wrap(~EVENT_DATE_YEAR, scales = 'free')+ 
-    theme(axis.text.x = element_text(angle = 90, hjust = 1))
-)
-
-(
-  survey.catch.tot <- ggplot(filtFC, aes(x = reorder(SPECIES_NAME, -ALL_RUNS), y = ALL_RUNS, fill = SITE_NAME)) +
-    geom_bar(stat = 'identity') +
-    #scale_y_log10(labels = scales::comma_format())+
-    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-    facet_wrap(~EVENT_DATE_YEAR, scales = 'free', drop = T) +
-    labs(x = "Species (Ordered by Abundance)", title = "Species Abundance per Site and Year")
-)
-
 filtFC.summary <- filtFC %>% 
-  group_by(SITE_NAME, SPECIES_NAME) %>%
+  group_by(SITE_NAME, SPECIES_NAME, EVENT_DATE_YEAR) %>%
   summarise(Total_Count = sum(ALL_RUNS), .groups = "drop")
 
-(
-  ggplot(filtFC.summary, aes(x = "", y = Total_Count, fill = SPECIES_NAME)) +
+##fish catch plots----
+
+# Create a list to store individual plots for each site
+site_survey_plot <- list()
+site_abundance_plot <- list()
+site_proportion_plot <- list()
+
+# Loop through each unique SITE_NAME for the different plots
+for (site in unique(filtFC$SITE_NAME)) {
+  
+  # Filter data for each site
+  site_data <- filtFC %>% filter(SITE_NAME == site)
+  site_summary <- filtFC.summary %>% filter(SITE_NAME == site)
+  
+  # Plot for Survey Type and Amount of Catch per Year
+  site_survey_plot[[site]] <- ggplot(site_data, aes(x = as.factor(EVENT_DATE_YEAR), fill = SURVEY_METHOD)) +
+    geom_bar(position = 'dodge') +
+    #facet_wrap(~EVENT_DATE_YEAR, scales = 'free') + 
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    labs(title = paste("Survey Type:", site), 
+         y = "Number of Surveys",
+         x = NULL,
+         fill = 'Method')
+  
+  # Plot for Species Abundance per Site and Year
+  site_abundance_plot[[site]] <- ggplot(site_summary, aes(x = SPECIES_NAME,
+                                                          y = Total_Count,
+                                                          fill = SPECIES_NAME)) +
+    geom_bar(stat = 'identity') +
+    facet_wrap(~EVENT_DATE_YEAR, scales = 'free') +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(title = paste("Species Abundance:", site),
+         x = NULL,
+         y = "Total Abundance")+
+    theme(legend.position = 'none')
+    
+    # Plot for Species Proportion Across All Surveys
+  site_proportion_plot[[site]] <- ggplot(site_summary, aes(x = "",
+                                                           y = Total_Count, fill = SPECIES_NAME)) +
     geom_bar(stat = 'identity') +
     coord_polar(theta = 'y') +
-    facet_wrap(~SITE_NAME, scales = "free_y") +
-    labs(title = "Species Composition per Site and Year", 
-         x = NULL, y = "Total Count")
-)
+    labs(x = NULL, y = "Proportion",
+         fill = 'Species') +
+    theme(axis.text.x = element_blank())
+}
 
-#it would probably be good to fold some of these species into an 'other category'
+##build plots based on site----
+
+# Combine the individual plots for each site (you can select the plots you want)
+for (site in names(site_survey_plot)) {
+  
+  # Get the individual plots for the site
+  survey_plot <- site_survey_plot[[site]]
+  abundance_plot <- site_abundance_plot[[site]]
+  proportion_plot <- site_proportion_plot[[site]]
+  
+  # Combine the plots using egg::ggarrange()
+  combined_plot <- ggarrange(survey_plot, abundance_plot, proportion_plot, 
+                             ncol = 3, nrow = 1)
+  
+  # Display the combined plot
+  print(combined_plot)
+}
+
+###combine the river sections and the plots of the species present----
+
+
+
+
+
+
