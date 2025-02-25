@@ -165,6 +165,7 @@ for (i in 1:nrow(bboxes_sf)) {
 # Assign names based on the bounding box names
 names(cropped_river_sections) <- bboxes_sf$name
 
+
 ###add in monitoring sites----
 
 # Create a list to store filtered monitoring sites per river section
@@ -186,21 +187,41 @@ plot_river_section <- function(section_name, river_section, bbox, monitoring_sit
     scale_color_manual(values = rainbow(nrow(monitoring_sites))) +  # Optional: Assign unique colors
     guides(color = guide_legend(title = "Monitoring Sites")) +  # Add legend title
     ggtitle(paste("River Section:", section_name)) +
-    theme_minimal()
+    theme_minimal()+
+    theme(
+      axis.title = element_blank(),  # Remove axis titles
+      axis.text = element_blank(),   # Remove axis text (labels)
+      axis.ticks = element_blank()   # Remove axis ticks
+    )
+    
 }
 
 # Generate and display all plots with monitoring sites and names
-plot_list <- lapply(names(cropped_river_sections), function(section) {
-  plot_river_section(
-    section,
-    cropped_river_sections[[section]], 
-    bboxes_sf[bboxes_sf$name == section, ],
-    monitoring_sites_by_section[[section]]
-  )
-})
+plot_list <- setNames(
+  lapply(names(cropped_river_sections), function(section) {
+    plot_river_section(
+      section,
+      cropped_river_sections[[section]], 
+      bboxes_sf[bboxes_sf$name == section, ],
+      monitoring_sites_by_section[[section]]
+    )
+  }),
+  names(cropped_river_sections)  # Assign section names as list names
+)
 
 # Print all plots
 for (p in plot_list) print(p)
+
+#Save the plots
+# Iterate over each plot in the plot_list
+for (section in names(plot_list)) {
+  # Define the filename for each plot (e.g., "Sawley-Attenborough.png")
+  filename <- paste0(section, "_plot.png")
+  
+  # Save the plot using ggsave
+  ggsave(filename, plot = plot_list[[section]], 
+         width = 14, height = 8, units = "cm", dpi = 300)
+}
 
 ##fish----
 
@@ -231,13 +252,17 @@ for (site in unique(filtFC$SITE_NAME)) {
   
   # Plot for Survey Type and Amount of Catch per Year
   site_survey_plot[[site]] <- ggplot(site_data, aes(x = as.factor(EVENT_DATE_YEAR), fill = SURVEY_METHOD)) +
-    geom_bar(position = 'dodge') +
+    geom_bar(stat = 'count',
+             position = 'dodge') +
     #facet_wrap(~EVENT_DATE_YEAR, scales = 'free') + 
     theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
     labs(title = paste("Survey Type:", site), 
          y = "Number of Surveys",
          x = NULL,
-         fill = 'Method')
+         fill = 'Method')+
+    scale_y_continuous(
+      breaks = seq(0, max(table(site_data$EVENT_DATE_YEAR)), by = 1),  # Major ticks every 1 unit
+      minor_breaks = seq(0, max(table(site_data$EVENT_DATE_YEAR)), by = 1))
   
   # Plot for Species Abundance per Site and Year
   site_abundance_plot[[site]] <- ggplot(site_summary, aes(x = SPECIES_NAME,
@@ -245,7 +270,7 @@ for (site in unique(filtFC$SITE_NAME)) {
                                                           fill = SPECIES_NAME)) +
     geom_bar(stat = 'identity') +
     facet_wrap(~EVENT_DATE_YEAR, scales = 'free') +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 8)) +
     labs(title = paste("Species Abundance:", site),
          x = NULL,
          y = "Total Abundance")+
@@ -264,23 +289,39 @@ for (site in unique(filtFC$SITE_NAME)) {
 ##build plots based on site----
 
 # Combine the individual plots for each site (you can select the plots you want)
+combined_survey_plots <- list()
+
 for (site in names(site_survey_plot)) {
   
   # Get the individual plots for the site
   survey_plot <- site_survey_plot[[site]]
   abundance_plot <- site_abundance_plot[[site]]
-  proportion_plot <- site_proportion_plot[[site]]
+  #proportion_plot <- site_proportion_plot[[site]]not sure this is necessary 
   
   # Combine the plots using egg::ggarrange()
-  combined_plot <- ggarrange(survey_plot, abundance_plot, proportion_plot, 
-                             ncol = 3, nrow = 1)
+  combined_plot <- ggarrange(survey_plot, abundance_plot,
+                             ncol = 2, nrow = 1)
   
   # Display the combined plot
-  print(combined_plot)
+  combined_survey_plots[[site]] <- combined_plot
 }
 
-###combine the river sections and the plots of the species present----
+print(names(combined_survey_plots))
 
+#Save the plots
+# Iterate over each plot in the plot_list
+for (section in names(combined_survey_plots)) {
+  # Define the filename for each plot (e.g., "Sawley-Attenborough.png")
+  filename <- paste0(section, "_plot.png")
+  
+  # Save the plot using ggsave
+  ggsave(filename, plot = combined_survey_plots[[section]], 
+         width = 22.78, height = 15.58, units = "cm", dpi = 300)
+}
+
+
+###combine the river sections and the plots of the species present----
+#looks like you cant ggarrange an object that has already had the arrange called on it- possibly clearer to just leave as maps anyway
 
 
 
