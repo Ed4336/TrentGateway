@@ -255,7 +255,8 @@ for (site in unique(filtFC$SITE_NAME)) {
     geom_bar(stat = 'count',
              position = 'dodge') +
     #facet_wrap(~EVENT_DATE_YEAR, scales = 'free') + 
-    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+          legend.position = 'bottom') +
     labs(title = paste("Survey Type:", site), 
          y = "Number of Surveys",
          x = NULL,
@@ -300,7 +301,8 @@ for (site in names(site_survey_plot)) {
   
   # Combine the plots using egg::ggarrange()
   combined_plot <- ggarrange(survey_plot, abundance_plot,
-                             ncol = 2, nrow = 1)
+                             ncol = 2, nrow = 1,
+                             widths = c(1,2))
   
   # Display the combined plot
   combined_survey_plots[[site]] <- combined_plot
