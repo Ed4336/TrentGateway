@@ -260,10 +260,11 @@ for (site in unique(filtFC$SITE_NAME)) {
     labs(title = paste("Survey Type:", site), 
          y = "Number of Surveys",
          x = NULL,
-         fill = 'Method')+
+         fill = NULL)+
     scale_y_continuous(
       breaks = seq(0, max(table(site_data$EVENT_DATE_YEAR)), by = 1),  # Major ticks every 1 unit
-      minor_breaks = seq(0, max(table(site_data$EVENT_DATE_YEAR)), by = 1))
+      minor_breaks = seq(0, max(table(site_data$EVENT_DATE_YEAR)), by = 1))+
+    guides(fill = guide_legend(ncol = 1))
   
   # Plot for Species Abundance per Site and Year
   site_abundance_plot[[site]] <- ggplot(site_summary, aes(x = SPECIES_NAME,
