@@ -417,6 +417,6 @@ for (section in names(plot_list_barriers)) {
   filename <- paste0(section, "_barrierplot.png")
   
   # Save the plot using ggsave
-  ggsave(filename, plot = plot_list[[section]], 
+  ggsave(filename, plot = plot_list_barriers[[section]], 
          width = 14, height = 8, units = "cm", dpi = 300)
 }
