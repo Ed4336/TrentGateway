@@ -326,7 +326,97 @@ for (section in names(combined_survey_plots)) {
 ###combine the river sections and the plots of the species present----
 #looks like you cant ggarrange an object that has already had the arrange called on it- possibly clearer to just leave as maps anyway
 
+#barrier tracking----
+
+amber.barriers <- read_csv('Data/atlas.csv')
+
+# Convert points to sf
+barriers.sf <- st_as_sf(amber.barriers, coords = c("Longitude_WGS84", "Latitude_WGS84"), crs = 4326) %>%
+  #transform to bng
+  st_transform(crs = 27700)
+
+#AZ.extent <- st_bbox(AZs_sf)
+
+Buff_riverLines_filtered <- st_buffer(riverLines_filtered, dist = 50)
+
+#AZ.extent.poly <- st_as_sfc(AZ.extent)
+
+AZ.barriers <- barriers.sf %>% 
+  st_filter(Buff_riverLines_filtered) %>% 
+  filter(!is.na(HClass))
+
+ggplot() +
+  annotation_map_tile(type = 'osm', zoom = 10) +  # Add OpenStreetMap tile background
+  geom_sf(data = riverLines_filtered, color = "blue", linewidth = 1) +  # Set blue river lines
+  geom_sf(data = AZ.barriers, aes(color = HClass), alpha = 1, size = 2) +  # Colored filled points for barriers
+  geom_point(data = AZ.barriers, aes(x = st_coordinates(geometry)[, 1], y = st_coordinates(geometry)[, 2], color = HClass), 
+             shape = 21, colour = "black", fill = "transparent", stroke = 0.5, size = 2.5) +  # Hollow black-lined points
+  scale_color_manual(values = c("<0.5" = "green", "1 to 2" = "yellow", "2 to 5" = "orange", "5 to 10" = "red")) +  # Custom color scale
+  theme_minimal() +  # Clean plot theme
+  labs(color = "Barrier Height",  # Legend title
+       title = "Trent Gateway Barriers",
+       x = NULL,  # Remove x-axis label
+       y = NULL) +  # Remove y-axis label
+  theme(legend.title = element_text(size = 12, face = "bold"),  # Format legend title
+        legend.text = element_text(size = 10),  # Customize legend text size
+        axis.title = element_blank(),  # Remove axis titles
+        axis.text = element_blank())  # Remove axis text
+
+##barriers by AZ----
+
+# List the barriers by section based on bounding boxes
+barriers_by_section <- lapply(1:nrow(bboxes_sf), function(i) {
+  bbox <- bboxes_sf[i, ]
+  barriers_in_bbox <- AZ.barriers[st_intersects(AZ.barriers, bbox, sparse = FALSE), ]
+  return(barriers_in_bbox)
+})
+
+names(barriers_by_section) <- bboxes_sf$name  # Set section names as names of list
+
+# Define a plotting function for each river section with barriers
+plot_river_section_with_barriers <- function(section_name, river_section, bbox, barriers) {
+  ggplot() +
+    annotation_map_tile(type = "osm", zoom = 12) +  # Add OpenStreetMap tile background
+    geom_sf(data = river_section, color = "blue", size = 1) +  # Plot river section in blue
+    geom_sf(data = bbox, fill = NA, color = "black", linetype = 'dashed') +  # Dashed bounding box
+    geom_sf(data = barriers, aes(color = HClass), size = 3) +  # Plot filled barriers colored by HClass
+    geom_point(data = barriers, aes(x = st_coordinates(geometry)[, 1], y = st_coordinates(geometry)[, 2], color = HClass), 
+               shape = 21, colour = "black", fill = "transparent", stroke = 0.5, size = 2.5) +  # Hollow black-lined points
+    scale_color_manual(values = c("<0.5" = "green", "1 to 2" = "yellow", "2 to 5" = "orange", "5 to 10" = "red")) +  # Custom color scale
+    guides(color = guide_legend(title = "Barrier Height")) +  # Legend for barrier height
+    ggtitle(paste("River Section:", section_name)) +  # Title
+    theme_minimal() +  # Clean theme
+    theme(
+      axis.title = element_blank(),  # Remove axis titles
+      axis.text = element_blank(),   # Remove axis text (labels)
+      axis.ticks = element_blank()   # Remove axis ticks
+    )
+}
 
 
+# Generate and display all plots with barriers and river sections
+plot_list_barriers <- setNames(
+  lapply(names(cropped_river_sections), function(section) {
+    plot_river_section_with_barriers(
+      section,
+      cropped_river_sections[[section]],  # The river section data
+      bboxes_sf[bboxes_sf$name == section, ],  # The bounding box for the section
+      barriers_by_section[[section]]  # The barriers for the section
+    )
+  }),
+  names(cropped_river_sections)  # Assign section names as list names
+)
 
+# Print all plots
+for (p in plot_list_barriers) print(p)
 
+#Save the plots
+# Iterate over each plot in the plot_list
+for (section in names(plot_list_barriers)) {
+  # Define the filename for each plot (e.g., "Sawley-Attenborough.png")
+  filename <- paste0(section, "_barrierplot.png")
+  
+  # Save the plot using ggsave
+  ggsave(filename, plot = plot_list[[section]], 
+         width = 14, height = 8, units = "cm", dpi = 300)
+}
