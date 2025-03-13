@@ -250,6 +250,11 @@ for (site in unique(filtFC$SITE_NAME)) {
   site_data <- filtFC %>% filter(SITE_NAME == site)
   site_summary <- filtFC.summary %>% filter(SITE_NAME == site)
   
+  
+  #this needs an edit to reflect species caught and not no's of surveys per year - each species is generating a new row and this is what is causing there to be several events per year
+  
+  #also edit to same technique
+  
   # Plot for Survey Type and Amount of Catch per Year
   site_survey_plot[[site]] <- ggplot(site_data, aes(x = as.factor(EVENT_DATE_YEAR), fill = SURVEY_METHOD)) +
     geom_bar(stat = 'count',

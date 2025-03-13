@@ -31,6 +31,8 @@ library(rasterVis)
 library(ecospat)
 library(tidyverse)
 library(parallel)
+#requires work on getting rjava to easily work
+
 library(rJava)
 library(rgbif)
 
@@ -171,6 +173,7 @@ set.seed(12)
 species_name <- "Rutilus rutilus"
 
 # Fetch occurrence data from GBIF
+
 species_occurrences <- occ_search(scientificName = species_name, country = "GB")
 
 # Convert occurrence data to a data frame
@@ -204,28 +207,30 @@ ggplot(species_coordinates_thinned, aes(x = decimalLongitude, y = decimalLatitud
 
 selected_variables <- c(
   "Annual.Mean.Upstream.Temperature",
-  "Upstream.Precipitation.of.Wettest",
+  #"Upstream.Precipitation.of.Wettest",
   "flow_acc",
   "slope_avg",
-  "open_water",
-  "flow_length",
-  "Upstream.Precipitation.Seasonality..Coefficient.of.Variation",
-  "dem_max",
+  #"open_water",
+  #"flow_length",
+  #"Upstream.Precipitation.Seasonality..Coefficient.of.Variation",
+  #"dem_max",
   "barren_lands.sparse_vegetation",
-  "shrubs",
-  "deciduous_broadleaf_trees",
-  "evergreen.deciduous_needleleaf_trees",
-  "evergreen_broadleaf_trees",
-  "mixed_other_trees",
+  #"shrubs",
+  #"deciduous_broadleaf_trees",
+  #"evergreen.deciduous_needleleaf_trees",
+  #"evergreen_broadleaf_trees",
+  #"mixed_other_trees",
   "Upstream.Temperature.Seasonality",
   "urban.built"
 )
 
 # Select only the desired layers
 selected_rasters <- all.vars[[selected_variables]]
+selected_rasters <- rast(selected_rasters)
 
 # Remove categorical variables before proceeding
-selected_rasters <- selected_rasters[[!sapply(selected_rasters, is.factor)]]
+#selected_rasters <- selected_rasters[[!sapply(selected_rasters, is.factor)]] %>% 
+#  print()
 
 # Calculate environmental similarity between occurrence points and environmental layers
 occurrence_similarity <- similarity(selected_rasters, species_coordinates)
@@ -240,11 +245,11 @@ rasterVis::levelplot(env_similarity_surface, main="Environmental Similarity Surf
 species_occurrences_sf <- st_as_sf(species_coordinates_thinned, coords = c("decimalLongitude", "decimalLatitude"), crs=4326)
 
 # Transform projection from WGS84 (degrees) to Eckert IV (meters)
-eckertIV <- "+proj=eck4 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
-species_occurrences_sf <- sf::st_transform(species_occurrences_sf, crs=eckertIV)
+#eckertIV <- "+proj=eck4 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+species_occurrences_sf <- sf::st_transform(species_occurrences_sf, crs=27700)
 
 # Visualize transformed occurrence points
-plot(st_geometry(species_occurrences_sf), main="Transformed Occurrence Points (Eckert IV)")
+plot(st_geometry(species_occurrences_sf), main="Transformed Occurrence Points (BNG)")
 
 # Generate pseudo-absence from local background ####
 # Buffer all occurrences by 50km
@@ -281,13 +286,17 @@ points(bg,pch=20, cex=0.2)
 
 head(bg)
 head(species_coordinates_thinned)
-block <- get.block(species_coordinates_thinned,bg,orientation = "lat_lon")
+block <- get.block(species_coordinates_thinned, bg, orientation = "lat_lon")
 
 #check for even no. of occurrences per partition
 table(block$occs.grp)
 
+#check buffered extent is a spatraster obj
+buffered_extent <- rast(buffered_extent)
+
 #plot partitions on to a predictor raster for visualisation
-evalplot.grps(pts = species_coordinates_thinned,pts.grp = block$occs.grp,envs = buffered_extent)
+evalplot.grps(pts = species_coordinates_thinned, pts.grp = block$occs.grp, envs = buffered_extent)
+
 
 #review correlation of environmental variables
 cor.matrix <- raster.cor.matrix(selected_rasters)
@@ -295,12 +304,17 @@ cor.matrix <- raster.cor.matrix(selected_rasters)
 cor.matrix.df <- cor.matrix %>%
   rownames_to_column(var = "Layer1") %>%
   pivot_longer(cols = -Layer1, names_to = "Layer2", values_to = "Correlation")
+
 #visualise
 ggplot(cor.matrix.df, aes(x = Layer1, y = Layer2, fill = Correlation))+
   geom_tile()+
+  geom_text(aes(label = round(Correlation,2)), 
+            color = 'white')+
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
 #Running model####
+
+#selected_rasters <- rast(selected_rasters)
 
 #Building a separate model for combinations of feature classes (Linear, Quadratic, Hinge, etc.) and regularisation multipliers
 #This uses the maxnet package not maxent.jar.
@@ -399,3 +413,4 @@ ggplot() +
        x = "Longitude",
        y = "Latitude") +
   theme(legend.position = "right")
+
