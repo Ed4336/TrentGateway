@@ -147,8 +147,12 @@ envs.final <- envs.selected[[!names(envs.selected) %in% envs.vif.rem.names]]
 terra::writeRaster(envs.final,
                    filename = file.path("Data", "Envt layers", "envs_final.tif"),
                    overwrite = TRUE)
-
+#load these from saved
 envs.final <- terra::rast("Data/Envt layers/envs_final.tif")
+
+#edit names to ensure that these are maxent friendly
+names(envs.final) <- make.names(names(envs.final), unique = TRUE)
+
 
 #Get occurrence data----
 
@@ -268,9 +272,61 @@ evalplot.grps(pts = species.occurrences.clean, pts.grp = species.occurrences.par
 
 #when using a 'custom' partitioning method we need to assign identifiers for group and bg points
 
-#assing background records
+#assigning background records
 
 bg.partition <- rep(0, nrow(bg))
 
 evalplot.grps(pts = bg, pts.grp = bg.partition, envs = envs.bg)
 
+#running the model----
+
+#build list of arguments to train on
+
+tune.args <- list(fc = c("L", "LQ", "LQH"), rm = 1:5)
+
+##run model----
+
+e.mx <- ENMevaluate(occs = species.occurences.thin, envs = envs.final, bg = bg,
+                    algorithm = 'maxnet', partitions = 'block',
+                    tune.args = tune.args,
+                    parallel = T)
+
+##review model performance
+
+evalplot.stats(e = e.mx, stats = c('or.10p', 'cbi.val'),
+               color = 'fc', x.var = 'rm', error.bars = F)
+
+##select optimal model----
+
+#collect the overall results
+
+res <- eval.results(e.mx)
+
+#select the model with the lowest overall AICc score
+
+opt.aicc <- res %>% 
+  filter(delta.AICc == 0)
+
+#complete the above sequentially, removing NA values first
+
+opt.seq <- res %>% 
+  filter(!is.na(or.10p.avg)) %>% 
+  filter(or.10p.avg == min(or.10p.avg)) %>% 
+  filter(cbi.val.avg == max(cbi.val.avg))
+
+
+mod.seq <- eval.models(e.mx)[[opt.seq$tune.args]]
+
+#plot(mod.seq)
+dev.off()
+
+##plot optimal model----
+
+pred.seq <- eval.predictions(e.mx)[[as.character(opt.seq$tune.args)]]
+plot(pred.seq)
+
+#tidy up model----
+
+terra::writeRaster(pred.seq,
+                   filename = file.path("Data", "Outputs", "test.tif"),
+                   overwrite = TRUE)
